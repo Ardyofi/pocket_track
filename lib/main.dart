@@ -282,7 +282,7 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
       padding: EdgeInsets.all(24),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [Color(0xFF667EEA), Color(0xFF764BA2)],
+          colors: [Color.fromARGB(255, 227, 142, 255), Color(0xFF764BA2)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -307,7 +307,7 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
           ),
           SizedBox(height: 8),
           Text(
-            '\$${totalExpenses.toStringAsFixed(2)}',
+            '\€${totalExpenses.toStringAsFixed(2)}',
             style: TextStyle(
               color: Colors.white,
               fontSize: 36,
@@ -317,7 +317,7 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
           SizedBox(height: 16),
           Row(
             children: [
-              Icon(Icons.trending_up, color: Colors.white, size: 20),
+              Icon(Icons.trending_up, color: const Color.fromARGB(255, 255, 255, 255), size: 20),
               SizedBox(width: 8),
               Text(
                 'This account',
@@ -372,7 +372,7 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    '\$${categoryAmount.toStringAsFixed(0)}',
+                    '\€${categoryAmount.toStringAsFixed(0)}',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -548,7 +548,7 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '-\$${expense.amount.toStringAsFixed(2)}',
+                    '-\€${expense.amount.toStringAsFixed(2)}',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -637,7 +637,7 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
     return Scaffold(
       backgroundColor: Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: Text('Expense Tracker - $currentAccountName'),
+        title: Text('Welcome, $currentAccountName'),
         actions: [
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert),
@@ -769,7 +769,7 @@ class _AccountManagerScreenState extends State<AccountManagerScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Delete Account?'),
-        content: Text('Are you sure you want to delete "$accountName" and all its expenses? This action cannot be undone.'),
+        content: Text('Are you sure you want to delete "$accountName" and all its expenses?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -909,7 +909,7 @@ class _AccountManagerScreenState extends State<AccountManagerScreen> {
                           ],
                         ],
                       ),
-                      subtitle: Text('$expenseCount expenses • \$' + totalAmount.toStringAsFixed(2)),
+                      subtitle: Text('$expenseCount expenses • \€' + totalAmount.toStringAsFixed(2)),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
