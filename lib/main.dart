@@ -637,9 +637,69 @@ class _AccountManagerScreenState extends State<AccountManagerScreen> {
     );
   }
 
+  Widget _buildHandleBar() => Container(
+    width: 40, height: 4,
+    decoration: BoxDecoration(
+      color: Colors.grey[400],
+      borderRadius: BorderRadius.circular(2),
+    ),
+  );
+
+  Widget _buildAccountTile(String name, bool isCurrentAccount) {
+    final expenseCount = getExpenseCountForAccount(name);
+    final totalAmount = getTotalAmountForAccount(name);
+    
+    return Container(
+      margin: EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: isCurrentAccount ? mainColor.withOpacity(0.1) : backgroundColor,
+        borderRadius: BorderRadius.circular(12),
+        border: isCurrentAccount ? Border.all(color: mainColor) : null,
+      ),
+      child: ListTile(
+        title: Row(
+          children: [
+            Text(name, style: TextStyle(fontWeight: FontWeight.w600)),
+            if (isCurrentAccount) ...[
+              SizedBox(width: 8),
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: mainColor,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text('Current',
+                  style: TextStyle(color: Colors.white, fontSize: 10)),
+              ),
+            ],
+          ],
+        ),
+        subtitle: Text('$expenseCount expenses • \€${totalAmount.toStringAsFixed(2)}'),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isCurrentAccount)
+              IconButton(
+                icon: Icon(Icons.switch_account, color: mainColor),
+                onPressed: () {
+                  widget.onSwitchAccount(name);
+                  Navigator.pop(context);
+                },
+              ),
+            if (name != 'Default')
+              IconButton(
+                icon: Icon(Icons.delete, color: Colors.red),
+                onPressed: () => showDeleteAccountConfirmation(name),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    List<String> accountNames = getAllAccountNames();
+    final accountNames = getAllAccountNames();
     
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -652,27 +712,11 @@ class _AccountManagerScreenState extends State<AccountManagerScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Handle bar
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[400],
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
+            Center(child: _buildHandleBar()),
             SizedBox(height: 16),
-            
-            // Title
-            Text(
-              'Manage Accounts',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
+            Text('Manage Accounts',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             SizedBox(height: 20),
-            
-            // Create new account section
             Row(
               children: [
                 Expanded(
@@ -690,7 +734,7 @@ class _AccountManagerScreenState extends State<AccountManagerScreen> {
                 ElevatedButton(
                   onPressed: createNewAccount,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Color(0xFF667EEA),
+                    backgroundColor: mainColor,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -700,84 +744,19 @@ class _AccountManagerScreenState extends State<AccountManagerScreen> {
                 ),
               ],
             ),
-            
             SizedBox(height: 20),
-            Text(
-              'Existing Accounts',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
+            Text('Existing Accounts',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             SizedBox(height: 12),
-            
-            // Accounts list
             Container(
               constraints: BoxConstraints(maxHeight: 300),
               child: ListView.builder(
                 shrinkWrap: true,
                 itemCount: accountNames.length,
-                itemBuilder: (context, index) {
-                  String accountName = accountNames[index];
-                  bool isCurrentAccount = accountName == widget.currentAccount;
-                  int expenseCount = getExpenseCountForAccount(accountName);
-                  double totalAmount = getTotalAmountForAccount(accountName);
-                  
-                  return Container(
-                    margin: EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                      color: isCurrentAccount 
-                          ? Color(0xFF667EEA).withOpacity(0.1) 
-                          : Color(0xFFF8F9FA),
-                      borderRadius: BorderRadius.circular(12),
-                      border: isCurrentAccount 
-                          ? Border.all(color: Color(0xFF667EEA)) 
-                          : null,
-                    ),
-                    child: ListTile(
-                      title: Row(
-                        children: [
-                          Text(
-                            accountName,
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          if (isCurrentAccount) ...[
-                            SizedBox(width: 8),
-                            Container(
-                              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Color(0xFF667EEA),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                'Current',
-                                style: TextStyle(color: Colors.white, fontSize: 10),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      subtitle: Text('$expenseCount expenses • \€' + totalAmount.toStringAsFixed(2)),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Switch account button
-                          if (!isCurrentAccount)
-                            IconButton(
-                              icon: Icon(Icons.switch_account, color: Color(0xFF667EEA)),
-                              onPressed: () {
-                                widget.onSwitchAccount(accountName);
-                                Navigator.pop(context);
-                              },
-                            ),
-                          // Delete account button
-                          if (accountName != 'Default')
-                            IconButton(
-                              icon: Icon(Icons.delete, color: Colors.red),
-                              onPressed: () => showDeleteAccountConfirmation(accountName),
-                            ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
+                itemBuilder: (_, i) => _buildAccountTile(
+                  accountNames[i],
+                  accountNames[i] == widget.currentAccount
+                ),
               ),
             ),
           ],
