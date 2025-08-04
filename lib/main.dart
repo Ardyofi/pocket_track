@@ -2,6 +2,38 @@ import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
+// App colors
+const mainColor = Color(0xFF667EEA);
+const backgroundColor = Color(0xFFF8F9FA);
+const textDark = Color(0xFF2D3436);
+const textLight = Color(0xFF636E72);
+
+// Predefined expense categories with their icons and colors
+final expenseCategories = {
+  'Food': (Icons.fastfood, Colors.orange),
+  'Travel': (Icons.airplanemode_active, Colors.blue),
+  'Shopping': (Icons.shopping_bag, Colors.purple),
+  'Bills': (Icons.receipt_long, Colors.red),
+  'Others': (Icons.miscellaneous_services, Colors.grey),
+};
+
+// Card decoration for balance card
+final balanceCardDecoration = BoxDecoration(
+  gradient: LinearGradient(
+    colors: [Color.fromARGB(255, 227, 142, 255), Color(0xFF764BA2)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  ),
+  borderRadius: BorderRadius.circular(20),
+  boxShadow: [
+    BoxShadow(
+      color: mainColor.withOpacity(0.3),
+      blurRadius: 20,
+      offset: Offset(0, 10),
+    ),
+  ],
+);
+
 // Main function - app starts here
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -56,61 +88,32 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
 
   // Get all expenses for current account
   List<Expense> getCurrentAccountExpenses() {
-    final expenseKeys = accountsBox.get(currentAccountName) as List<dynamic>?;
-    if (expenseKeys == null) return [];
-    
-    List<Expense> expenses = [];
-    for (var key in expenseKeys) {
-      final expense = expensesBox.get(key);
-      if (expense != null) {
-        expenses.add(expense);
-      }
-    }
-    return expenses;
+    // Get list of expense IDs for current account
+    final expenseIds = accountsBox.get(currentAccountName) as List<dynamic>? ?? [];
+    // Get actual expense objects from the IDs
+    return expenseIds.map((id) => expensesBox.get(id)).whereType<Expense>().toList();
   }
 
   // Calculate total amount spent
   double calculateTotalExpenses() {
-    double total = 0;
-    List<Expense> expenses = getCurrentAccountExpenses();
-    for (var expense in expenses) {
-      total = total + expense.amount;
-    }
-    return total;
+    return getCurrentAccountExpenses().fold(0.0, (sum, expense) => sum + expense.amount);
   }
 
   // Get spending by category
   Map<String, double> getCategoryTotals() {
-    Map<String, double> categoryTotals = {};
-    List<Expense> expenses = getCurrentAccountExpenses();
-    
-    for (var expense in expenses) {
-      String category = expense.category;
-      if (categoryTotals.containsKey(category)) {
-        categoryTotals[category] = categoryTotals[category]! + expense.amount;
-      } else {
-        categoryTotals[category] = expense.amount;
-      }
+    var totals = <String, double>{};
+    for (var expense in getCurrentAccountExpenses()) {
+      totals[expense.category] = (totals[expense.category] ?? 0) + expense.amount;
     }
-    return categoryTotals;
+    return totals;
   }
 
-  // Format date to show time ago
-  String formatTimeAgo(DateTime expenseDate) {
-    final now = DateTime.now();
-    final difference = now.difference(expenseDate);
-
-    if (difference.inDays == 0) {
-      if (difference.inHours == 0) {
-        return '${difference.inMinutes}m ago';
-      } else {
-        return '${difference.inHours}h ago';
-      }
-    } else if (difference.inDays == 1) {
-      return 'Yesterday';
-    } else {
-      return '${difference.inDays}d ago';
-    }
+  // Format date to show time ago (e.g., "2h ago", "Yesterday", "3d ago")
+  String formatTimeAgo(DateTime date) {
+    final diff = DateTime.now().difference(date);
+    if (diff.inDays == 0) return diff.inHours == 0 ? '${diff.inMinutes}m ago' : '${diff.inHours}h ago';
+    if (diff.inDays == 1) return 'Yesterday';
+    return '${diff.inDays}d ago';
   }
 
   // Add new expense
@@ -214,16 +217,17 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
     );
   }
 
-  // Show delete all expenses dialog
-  void showDeleteAllExpensesDialog() {
-    List<Expense> expenses = getCurrentAccountExpenses();
-    if (expenses.isEmpty) return;
-    
-    showDialog(
+  // Show confirmation dialog with custom title and action
+  Future<void> showConfirmDialog({
+    required String title,
+    required String content,
+    required VoidCallback onConfirm,
+  }) {
+    return showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Delete All Expenses?'),
-        content: Text('Are you sure you want to delete all ${expenses.length} expenses from "$currentAccountName"? This action cannot be undone.'),
+        title: Text(title),
+        content: Text(content),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -231,35 +235,7 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
           ),
           ElevatedButton(
             onPressed: () {
-              deleteAllExpenses();
-              Navigator.pop(context);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: Text('Delete All'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Show delete single expense dialog
-  void showDeleteExpenseDialog(Expense expense, int index) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Delete Expense?'),
-        content: Text('Are you sure you want to delete "${expense.title}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              removeExpense(index);
+              onConfirm();
               Navigator.pop(context);
             },
             style: ElevatedButton.styleFrom(
@@ -273,117 +249,81 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
     );
   }
 
-  // Build the balance card widget
-  Widget buildBalanceCard() {
-    double totalExpenses = calculateTotalExpenses();
+  // Show delete all expenses dialog
+  void showDeleteAllExpensesDialog() {
+    var expenses = getCurrentAccountExpenses();
+    if (expenses.isEmpty) return;
     
-    return Container(
-      margin: EdgeInsets.all(20),
-      padding: EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color.fromARGB(255, 227, 142, 255), Color(0xFF764BA2)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Color(0xFF667EEA).withOpacity(0.3),
-            blurRadius: 20,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Total Expenses',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.8),
-              fontSize: 16,
-            ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            '\€${totalExpenses.toStringAsFixed(2)}',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 36,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          SizedBox(height: 16),
-          Row(
-            children: [
-              Icon(Icons.trending_up, color: const Color.fromARGB(255, 255, 255, 255), size: 20),
-              SizedBox(width: 8),
-              Text(
-                'This account',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.8),
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+    showConfirmDialog(
+      title: 'Delete All Expenses?',
+      content: 'Are you sure you want to delete all ${expenses.length} expenses from "$currentAccountName"? This action cannot be undone.',
+      onConfirm: deleteAllExpenses,
     );
   }
 
+  // Show delete single expense dialog
+  void showDeleteExpenseDialog(Expense expense, int index) {
+    showConfirmDialog(
+      title: 'Delete Expense?',
+      content: 'Are you sure you want to delete "${expense.title}"?',
+      onConfirm: () => removeExpense(index),
+    );
+  }
+
+  // Build the balance card widget
+  Widget buildBalanceCard() => Container(
+    margin: EdgeInsets.all(20),
+    padding: EdgeInsets.all(24),
+    decoration: balanceCardDecoration,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Total Expenses', 
+          style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 16)),
+        SizedBox(height: 8),
+        Text('\€${calculateTotalExpenses().toStringAsFixed(2)}',
+          style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
+        SizedBox(height: 16),
+        Row(children: [
+          Icon(Icons.trending_up, color: Colors.white, size: 20),
+          SizedBox(width: 8),
+          Text('This account', 
+            style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14)),
+        ]),
+      ],
+    ),
+  );
+
   // Build category stats widget
   Widget buildCategoryStats() {
-    Map<String, double> categoryTotals = getCategoryTotals();
-    if (categoryTotals.isEmpty) return SizedBox.shrink();
+    var totals = getCategoryTotals();
+    if (totals.isEmpty) return SizedBox.shrink();
     
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 20),
       child: Row(
-        children: categoryTotals.entries.take(3).map((categoryEntry) {
-          String categoryName = categoryEntry.key;
-          double categoryAmount = categoryEntry.value;
-          
-          return Expanded(
-            child: Container(
-              margin: EdgeInsets.symmetric(horizontal: 4),
-              padding: EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: Offset(0, 2),
-                  )
-                ],
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    categoryName,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF636E72),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    '\€${categoryAmount.toStringAsFixed(0)}',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF2D3436),
-                    ),
-                  ),
-                ],
-              ),
+        children: totals.entries.take(3).map((e) => Expanded(
+          child: Container(
+            margin: EdgeInsets.symmetric(horizontal: 4),
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: Offset(0, 2),
+              )],
             ),
-          );
-        }).toList(),
+            child: Column(children: [
+              Text(e.key, style: TextStyle(
+                fontSize: 12, color: textLight, fontWeight: FontWeight.w600)),
+              SizedBox(height: 8),
+              Text('\€${e.value.toStringAsFixed(0)}', style: TextStyle(
+                fontSize: 18, fontWeight: FontWeight.bold, color: textDark)),
+            ]),
+          ),
+        )).toList(),
       ),
     );
   }
@@ -403,28 +343,13 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
             // Header
             Padding(
               padding: EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Recent Transactions',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF2D3436),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () {}, // Could add "See All" functionality
-                    child: Text(
-                      'See All',
-                      style: TextStyle(
-                        color: Color(0xFF667EEA),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
+              child: Text(
+                'Recent Transactions',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF2D3436),
+                ),
               ),
             ),
             
@@ -440,196 +365,116 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
     );
   }
 
-  // Build empty expenses widget
-  Widget buildEmptyExpensesWidget() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.receipt_long_outlined,
-            size: 64,
-            color: Colors.grey[400],
+  // Empty state widget
+  Widget buildEmptyExpensesWidget() => Center(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey[400]),
+        SizedBox(height: 16),
+        Text('No expenses yet',
+          style: TextStyle(fontSize: 18, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+        SizedBox(height: 8),
+        Text('Tap the + button to add your first expense',
+          style: TextStyle(fontSize: 14, color: Colors.grey[500])),
+      ],
+    ),
+  );
+
+  // List of expenses
+  Widget buildExpensesListView(List<Expense> expenses) => ListView.builder(
+    padding: EdgeInsets.symmetric(horizontal: 20),
+    itemCount: expenses.length,
+    itemBuilder: (_, i) => buildExpenseItem(expenses[i], i),
+  );
+
+  // Single expense item
+  Widget buildExpenseItem(Expense e, int index) => Dismissible(
+    key: Key('expense_${e.hashCode}_$index'),
+    direction: DismissDirection.endToStart,
+    background: Container(
+      color: Colors.red,
+      alignment: Alignment.centerRight,
+      padding: EdgeInsets.only(right: 20),
+      child: Icon(Icons.delete, color: Colors.white),
+    ),
+    confirmDismiss: (_) => showSwipeDeleteConfirmation(e),
+    onDismissed: (_) => removeExpense(index),
+    child: GestureDetector(
+      onLongPress: () => showDeleteExpenseDialog(e, index),
+      child: Container(
+        margin: EdgeInsets.only(bottom: 12),
+        padding: EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.withOpacity(0.1)),
+        ),
+        child: Row(children: [
+          // Icon
+          Container(
+            padding: EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: e.color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(e.icon, color: e.color, size: 24),
           ),
-          SizedBox(height: 16),
-          Text(
-            'No expenses yet',
-            style: TextStyle(
-              fontSize: 18,
-              color: Colors.grey[600],
-              fontWeight: FontWeight.w500,
+          SizedBox(width: 16),
+          
+          // Title and category
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(e.title,
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: textDark)),
+                SizedBox(height: 4),
+                Text(e.category,
+                  style: TextStyle(fontSize: 14, color: textLight)),
+              ],
             ),
           ),
-          SizedBox(height: 8),
-          Text(
-            'Tap the + button to add your first expense',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[500],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Build expenses list view
-  Widget buildExpensesListView(List<Expense> expenses) {
-    return ListView.builder(
-      padding: EdgeInsets.symmetric(horizontal: 20),
-      itemCount: expenses.length,
-      itemBuilder: (context, index) {
-        final expense = expenses[index];
-        return buildExpenseItem(expense, index);
-      },
-    );
-  }
-
-  // Build single expense item
-  Widget buildExpenseItem(Expense expense, int index) {
-    return Dismissible(
-      key: Key('expense_${expense.hashCode}_$index'),
-      direction: DismissDirection.endToStart,
-      background: buildSwipeToDeleteBackground(),
-      confirmDismiss: (direction) async {
-        return await showSwipeDeleteConfirmation(expense);
-      },
-      onDismissed: (direction) => removeExpense(index),
-      child: GestureDetector(
-        onLongPress: () => showDeleteExpenseDialog(expense, index),
-        child: Container(
-          margin: EdgeInsets.only(bottom: 12),
-          padding: EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Color(0xFFF8F9FA),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.withOpacity(0.1)),
-          ),
-          child: Row(
+          
+          // Amount and date
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              // Icon
-              Container(
-                padding: EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: expense.color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(expense.icon, color: expense.color, size: 24),
-              ),
-              SizedBox(width: 16),
-              
-              // Title and category
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      expense.title,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF2D3436),
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      expense.category,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Color(0xFF636E72),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              // Amount and date
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '-\€${expense.amount.toStringAsFixed(2)}',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.redAccent,
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    formatTimeAgo(expense.date),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF636E72),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(width: 8),
-              
-              // Delete button
-              IconButton(
-                icon: Icon(Icons.delete_outline, color: Colors.grey[600], size: 20),
-                onPressed: () => showDeleteExpenseDialog(expense, index),
-                tooltip: 'Delete expense',
-              ),
+              Text('-\€${e.amount.toStringAsFixed(2)}',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+              SizedBox(height: 4),
+              Text(formatTimeAgo(e.date),
+                style: TextStyle(fontSize: 12, color: textLight)),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  // Build swipe to delete background
-  Widget buildSwipeToDeleteBackground() {
-    return Container(
-      margin: EdgeInsets.only(bottom: 12),
-      padding: EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-        color: Colors.red,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      alignment: Alignment.centerRight,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Icon(Icons.delete, color: Colors.white, size: 24),
           SizedBox(width: 8),
-          Text(
-            'Delete',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
+          
+          // Delete button
+          IconButton(
+            icon: Icon(Icons.delete_outline, color: Colors.grey[600], size: 20),
+            onPressed: () => showDeleteExpenseDialog(e, index),
+            tooltip: 'Delete expense',
           ),
-        ],
+        ]),
       ),
-    );
-  }
+    ),
+  );
+
 
   // Show swipe delete confirmation
   Future<bool?> showSwipeDeleteConfirmation(Expense expense) async {
-    return await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Delete Expense?'),
-        content: Text('Are you sure you want to delete "${expense.title}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: Text('Delete'),
-          ),
-        ],
-      ),
-    );
+  return await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text('Delete?'),
+          content: Text('Delete "${expense.title}"?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: Text('No')),
+            TextButton(onPressed: () => Navigator.pop(context, true), child: Text('Yes')),
+          ],
+        ),
+      ) ??
+      false;
   }
 
   @override
@@ -943,6 +788,7 @@ class _AccountManagerScreenState extends State<AccountManagerScreen> {
 }
 
 // Add Expense Screen
+// Screen for adding new expenses
 class AddExpenseScreen extends StatefulWidget {
   final Function(Expense) onAddExpense;
   
@@ -953,31 +799,16 @@ class AddExpenseScreen extends StatefulWidget {
 }
 
 class _AddExpenseScreenState extends State<AddExpenseScreen> {
-  final GlobalKey<FormState> formKey = GlobalKey<FormState>();
-  final TextEditingController titleController = TextEditingController();
-  final TextEditingController amountController = TextEditingController();
+  final formKey = GlobalKey<FormState>();
+  final titleController = TextEditingController();
+  final amountController = TextEditingController();
 
   String selectedCategory = 'Food';
-  IconData selectedIcon = Icons.fastfood;
-  Color selectedColor = Colors.orange;
   DateTime selectedDate = DateTime.now();
 
-  // Category options
-  final Map<String, IconData> categoryIconOptions = {
-    'Food': Icons.fastfood,
-    'Travel': Icons.airplanemode_active,
-    'Shopping': Icons.shopping_bag,
-    'Bills': Icons.receipt_long,
-    'Others': Icons.miscellaneous_services,
-  };
-
-  final Map<String, Color> categoryColorOptions = {
-    'Food': Colors.orange,
-    'Travel': Colors.blue,
-    'Shopping': Colors.purple,
-    'Bills': Colors.red,
-    'Others': Colors.grey,
-  };
+  // Get icon and color for selected category
+  IconData get categoryIcon => expenseCategories[selectedCategory]!.$1;
+  Color get categoryColor => expenseCategories[selectedCategory]!.$2;
 
   // Submit new expense
   void submitExpense() {
@@ -986,8 +817,8 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
         title: titleController.text,
         amount: double.parse(amountController.text),
         category: selectedCategory,
-        icon: selectedIcon,
-        color: selectedColor,
+        icon: categoryIcon,
+        color: categoryColor,
         date: selectedDate,
       );
       widget.onAddExpense(newExpense);
@@ -1076,19 +907,22 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
               DropdownButtonFormField<String>(
                 value: selectedCategory,
                 decoration: InputDecoration(labelText: 'Category'),
-                items: categoryIconOptions.keys.map((categoryName) {
+                items: expenseCategories.keys.map((category) {
                   return DropdownMenuItem(
-                    value: categoryName,
-                    child: Text(categoryName),
+                    value: category,
+                    child: Row(
+                      children: [
+                        Icon(expenseCategories[category]!.$1, 
+                             color: expenseCategories[category]!.$2),
+                        SizedBox(width: 8),
+                        Text(category),
+                      ],
+                    ),
                   );
                 }).toList(),
                 onChanged: (newCategory) {
                   if (newCategory != null) {
-                    setState(() {
-                      selectedCategory = newCategory;
-                      selectedIcon = categoryIconOptions[newCategory]!;
-                      selectedColor = categoryColorOptions[newCategory]!;
-                    });
+                    setState(() => selectedCategory = newCategory);
                   }
                 },
               ),
