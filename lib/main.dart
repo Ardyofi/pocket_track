@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:hive/hive.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 // App colors
 const mainColor = Color(0xFF667EEA);
@@ -34,18 +34,10 @@ final balanceCardDecoration = BoxDecoration(
   ],
 );
 
-// Main function - app starts here
+// Main function, app starts here
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Initialize Hive database
-  await Hive.initFlutter();
-  Hive.registerAdapter(ExpenseAdapter());
-  
-  // Open database boxes
-  await Hive.openBox('accountsBox');
-  await Hive.openBox<Expense>('expensesBox');
-
   runApp(MaterialApp(
     title: 'Expense Tracker',
     theme: ThemeData(
@@ -63,35 +55,85 @@ class ExpenseTrackerApp extends StatefulWidget {
 }
 
 class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
-  // Database boxes
-  late Box accountsBox;
-  late Box<Expense> expensesBox;
+  // SharedPreferences instance
+  late SharedPreferences prefs;
   
   // Current account name
   String currentAccountName = 'Default';
+  
+  // In-memory storage for performance
+  Map<String, List<Expense>> accountExpenses = {};
+  bool isLoaded = false;
 
   @override
   void initState() {
     super.initState();
-    // Get database boxes
-    accountsBox = Hive.box('accountsBox');
-    expensesBox = Hive.box<Expense>('expensesBox');
+    initializeApp();
+  }
 
+  // Initialize SharedPreferences and load data
+  Future<void> initializeApp() async {
+    prefs = await SharedPreferences.getInstance();
+    await loadAllData();
+    
     // Get current account or set default
-    currentAccountName = accountsBox.get('currentAccount', defaultValue: 'Default');
-
+    currentAccountName = prefs.getString('currentAccount') ?? 'Default';
+    
     // Create default account if it doesn't exist
-    if (!accountsBox.containsKey(currentAccountName)) {
-      accountsBox.put(currentAccountName, <dynamic>[]);
+    if (!accountExpenses.containsKey(currentAccountName)) {
+      accountExpenses[currentAccountName] = [];
+      await saveAccountData(currentAccountName);
     }
+    
+    setState(() {
+      isLoaded = true;
+    });
+  }
+
+  // Load all data from SharedPreferences
+  Future<void> loadAllData() async {
+    final accountKeys = prefs.getKeys().where((key) => 
+      key.startsWith('account_') && key != 'currentAccount').toList();
+    
+    for (String key in accountKeys) {
+      String accountName = key.substring(8); // Remove 'account_' prefix
+      await loadAccountData(accountName);
+    }
+    
+    // Ensure default account exists
+    if (!accountExpenses.containsKey('Default')) {
+      accountExpenses['Default'] = [];
+    }
+  }
+
+  // Load data for specific account
+  Future<void> loadAccountData(String accountName) async {
+    final jsonString = prefs.getString('account_$accountName');
+    if (jsonString != null) {
+      try {
+        final List<dynamic> jsonList = json.decode(jsonString);
+        accountExpenses[accountName] = jsonList
+            .map((json) => Expense.fromJson(json))
+            .toList();
+      } catch (e) {
+        print('Error loading account $accountName: $e');
+        accountExpenses[accountName] = [];
+      }
+    } else {
+      accountExpenses[accountName] = [];
+    }
+  }
+
+  // Save data for specific account
+  Future<void> saveAccountData(String accountName) async {
+    final expenses = accountExpenses[accountName] ?? [];
+    final jsonString = json.encode(expenses.map((e) => e.toJson()).toList());
+    await prefs.setString('account_$accountName', jsonString);
   }
 
   // Get all expenses for current account
   List<Expense> getCurrentAccountExpenses() {
-    // Get list of expense IDs for current account
-    final expenseIds = accountsBox.get(currentAccountName) as List<dynamic>? ?? [];
-    // Get actual expense objects from the IDs
-    return expenseIds.map((id) => expensesBox.get(id)).whereType<Expense>().toList();
+    return accountExpenses[currentAccountName] ?? [];
   }
 
   // Calculate total amount spent
@@ -118,13 +160,15 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
 
   // Add new expense
   void addNewExpense(Expense newExpense) async {
-    // Save expense to database
-    final expenseKey = await expensesBox.add(newExpense);
+    if (!accountExpenses.containsKey(currentAccountName)) {
+      accountExpenses[currentAccountName] = [];
+    }
     
-    // Add expense key to current account
-    final currentExpenseKeys = List<dynamic>.from(accountsBox.get(currentAccountName) ?? <dynamic>[]);
-    currentExpenseKeys.insert(0, expenseKey); // Add to beginning of list
-    await accountsBox.put(currentAccountName, currentExpenseKeys);
+    // Add to beginning of list (most recent first)
+    accountExpenses[currentAccountName]!.insert(0, newExpense);
+    
+    // Save to SharedPreferences
+    await saveAccountData(currentAccountName);
     
     // Refresh the screen
     setState(() {});
@@ -132,50 +176,40 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
 
   // Remove single expense
   void removeExpense(int expenseIndex) async {
-    final expenseKeys = List<dynamic>.from(accountsBox.get(currentAccountName) ?? <dynamic>[]);
-    if (expenseIndex < expenseKeys.length) {
-      // Delete expense from database
-      final keyToDelete = expenseKeys[expenseIndex];
-      await expensesBox.delete(keyToDelete);
-      
-      // Remove key from account list
-      expenseKeys.removeAt(expenseIndex);
-      await accountsBox.put(currentAccountName, expenseKeys);
-      
-      // Refresh the screen
+    final expenses = accountExpenses[currentAccountName];
+    if (expenses != null && expenseIndex < expenses.length) {
+      expenses.removeAt(expenseIndex);
+      await saveAccountData(currentAccountName);
       setState(() {});
     }
   }
 
   // Switch to different account
-  void switchToAccount(String accountName) {
+  Future<void> switchToAccount(String accountName) async {
     setState(() {
       currentAccountName = accountName;
-      accountsBox.put('currentAccount', currentAccountName);
-      
-      // Create account if it doesn't exist
-      if (!accountsBox.containsKey(currentAccountName)) {
-        accountsBox.put(currentAccountName, <dynamic>[]);
-      }
     });
+    
+    await prefs.setString('currentAccount', currentAccountName);
+    
+    // Create account if it doesn't exist
+    if (!accountExpenses.containsKey(currentAccountName)) {
+      accountExpenses[currentAccountName] = [];
+      await saveAccountData(currentAccountName);
+    }
   }
 
   // Delete an account
   void deleteAccount(String accountName) async {
     if (accountName == 'Default') return; // Don't delete default account
     
-    // Delete all expenses in this account
-    final expenseKeys = List<dynamic>.from(accountsBox.get(accountName) ?? <dynamic>[]);
-    for (var key in expenseKeys) {
-      await expensesBox.delete(key);
-    }
-    
-    // Remove the account
-    await accountsBox.delete(accountName);
+    // Remove from memory and SharedPreferences
+    accountExpenses.remove(accountName);
+    await prefs.remove('account_$accountName');
     
     // Switch to default if we deleted current account
     if (currentAccountName == accountName) {
-      switchToAccount('Default');
+      await switchToAccount('Default');
     } else {
       setState(() {});
     }
@@ -183,12 +217,25 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
 
   // Delete all expenses in current account
   void deleteAllExpenses() async {
-    final expenseKeys = List<dynamic>.from(accountsBox.get(currentAccountName) ?? <dynamic>[]);
-    for (var key in expenseKeys) {
-      await expensesBox.delete(key);
-    }
-    await accountsBox.put(currentAccountName, <dynamic>[]);
+    accountExpenses[currentAccountName] = [];
+    await saveAccountData(currentAccountName);
     setState(() {});
+  }
+
+  // Get all account names
+  List<String> getAllAccountNames() {
+    return accountExpenses.keys.toList()..sort();
+  }
+
+  // Get number of expenses in account
+  int getExpenseCountForAccount(String accountName) {
+    return accountExpenses[accountName]?.length ?? 0;
+  }
+
+  // Get total amount spent in account
+  double getTotalAmountForAccount(String accountName) {
+    final expenses = accountExpenses[accountName] ?? [];
+    return expenses.fold(0.0, (sum, expense) => sum + expense.amount);
   }
 
   // Show add expense screen
@@ -211,10 +258,21 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
         currentAccount: currentAccountName,
         onSwitchAccount: switchToAccount,
         onDeleteAccount: deleteAccount,
-        accountsBox: accountsBox,
-        expensesBox: expensesBox,
+        onCreateAccount: createNewAccount,
+        getAllAccountNames: getAllAccountNames,
+        getExpenseCountForAccount: getExpenseCountForAccount,
+        getTotalAmountForAccount: getTotalAmountForAccount,
       ),
     );
+  }
+
+  // Create new account
+  Future<void> createNewAccount(String accountName) async {
+    if (accountName.isNotEmpty && !accountExpenses.containsKey(accountName)) {
+      accountExpenses[accountName] = [];
+      await saveAccountData(accountName);
+      await switchToAccount(accountName);
+    }
   }
 
   // Show confirmation dialog with custom title and action
@@ -460,25 +518,33 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
     ),
   );
 
-
   // Show swipe delete confirmation
   Future<bool?> showSwipeDeleteConfirmation(Expense expense) async {
-  return await showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: Text('Delete?'),
-          content: Text('Delete "${expense.title}"?'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: Text('No')),
-            TextButton(onPressed: () => Navigator.pop(context, true), child: Text('Yes')),
-          ],
-        ),
-      ) ??
-      false;
+    return await showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: Text('Delete?'),
+            content: Text('Delete "${expense.title}"?'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: Text('No')),
+              TextButton(onPressed: () => Navigator.pop(context, true), child: Text('Yes')),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!isLoaded) {
+      return Scaffold(
+        backgroundColor: backgroundColor,
+        body: Center(
+          child: CircularProgressIndicator(color: mainColor),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Color(0xFFF8F9FA),
       appBar: AppBar(
@@ -543,17 +609,21 @@ class _ExpenseTrackerAppState extends State<ExpenseTrackerApp> {
 // Account Manager Screen
 class AccountManagerScreen extends StatefulWidget {
   final String currentAccount;
-  final Function(String) onSwitchAccount;
+  final Future<void> Function(String) onSwitchAccount;
   final Function(String) onDeleteAccount;
-  final Box accountsBox;
-  final Box<Expense> expensesBox;
+  final Function(String) onCreateAccount;
+  final List<String> Function() getAllAccountNames;
+  final int Function(String) getExpenseCountForAccount;
+  final double Function(String) getTotalAmountForAccount;
 
   AccountManagerScreen({
     required this.currentAccount,
     required this.onSwitchAccount,
     required this.onDeleteAccount,
-    required this.accountsBox,
-    required this.expensesBox,
+    required this.onCreateAccount,
+    required this.getAllAccountNames,
+    required this.getExpenseCountForAccount,
+    required this.getTotalAmountForAccount,
   });
 
   @override
@@ -563,45 +633,11 @@ class AccountManagerScreen extends StatefulWidget {
 class _AccountManagerScreenState extends State<AccountManagerScreen> {
   final TextEditingController newAccountController = TextEditingController();
 
-  // Get all account names
-  List<String> getAllAccountNames() {
-    List<String> accountNames = [];
-    for (var key in widget.accountsBox.keys) {
-      if (key != 'currentAccount') {
-        accountNames.add(key.toString());
-      }
-    }
-    accountNames.sort();
-    return accountNames;
-  }
-
-  // Get number of expenses in account
-  int getExpenseCountForAccount(String accountName) {
-    final expenseKeys = widget.accountsBox.get(accountName) as List<dynamic>?;
-    return expenseKeys?.length ?? 0;
-  }
-
-  // Get total amount spent in account
-  double getTotalAmountForAccount(String accountName) {
-    final expenseKeys = widget.accountsBox.get(accountName) as List<dynamic>?;
-    if (expenseKeys == null) return 0;
-    
-    double total = 0;
-    for (var key in expenseKeys) {
-      final expense = widget.expensesBox.get(key);
-      if (expense != null) {
-        total = total + expense.amount;
-      }
-    }
-    return total;
-  }
-
   // Create new account
   void createNewAccount() {
     String accountName = newAccountController.text.trim();
-    if (accountName.isNotEmpty && !widget.accountsBox.containsKey(accountName)) {
-      widget.accountsBox.put(accountName, <dynamic>[]);
-      widget.onSwitchAccount(accountName);
+    if (accountName.isNotEmpty) {
+      widget.onCreateAccount(accountName);
       Navigator.pop(context);
     }
   }
@@ -646,8 +682,8 @@ class _AccountManagerScreenState extends State<AccountManagerScreen> {
   );
 
   Widget _buildAccountTile(String name, bool isCurrentAccount) {
-    final expenseCount = getExpenseCountForAccount(name);
-    final totalAmount = getTotalAmountForAccount(name);
+    final expenseCount = widget.getExpenseCountForAccount(name);
+    final totalAmount = widget.getTotalAmountForAccount(name);
     
     return Container(
       margin: EdgeInsets.only(bottom: 8),
@@ -681,8 +717,8 @@ class _AccountManagerScreenState extends State<AccountManagerScreen> {
             if (!isCurrentAccount)
               IconButton(
                 icon: Icon(Icons.switch_account, color: mainColor),
-                onPressed: () {
-                  widget.onSwitchAccount(name);
+                onPressed: () async {
+                  await widget.onSwitchAccount(name);
                   Navigator.pop(context);
                 },
               ),
@@ -699,7 +735,7 @@ class _AccountManagerScreenState extends State<AccountManagerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final accountNames = getAllAccountNames();
+    final accountNames = widget.getAllAccountNames();
     
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -767,7 +803,6 @@ class _AccountManagerScreenState extends State<AccountManagerScreen> {
 }
 
 // Add Expense Screen
-// Screen for adding new expenses
 class AddExpenseScreen extends StatefulWidget {
   final Function(Expense) onAddExpense;
   
@@ -941,24 +976,12 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
 }
 
 // Expense data model
-@HiveType(typeId: 0)
-class Expense extends HiveObject {
-  @HiveField(0)
+class Expense {
   final String title;
-  
-  @HiveField(1) 
   final double amount;
-  
-  @HiveField(2)
   final String category;
-  
-  @HiveField(3)
   final IconData icon;
-  
-  @HiveField(4)
   final Color color;
-  
-  @HiveField(5)
   final DateTime date;
 
   Expense({
@@ -969,32 +992,41 @@ class Expense extends HiveObject {
     required this.color,
     required this.date,
   });
-}
 
-// Expense database adapter
-class ExpenseAdapter extends TypeAdapter<Expense> {
-  @override
-  final typeId = 0;
+  // Convert Expense to JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'title': title,
+      'amount': amount,
+      'category': category,
+      'iconCodePoint': icon.codePoint,
+      'colorValue': color.value,
+      'dateMilliseconds': date.millisecondsSinceEpoch,
+    };
+  }
 
-  @override
-  Expense read(BinaryReader reader) {
+  // Create Expense from JSON
+  factory Expense.fromJson(Map<String, dynamic> json) {
     return Expense(
-      title: reader.readString(),
-      amount: reader.readDouble(),
-      category: reader.readString(),
-      icon: IconData(reader.readInt(), fontFamily: 'MaterialIcons'),
-      color: Color(reader.readInt()),
-      date: DateTime.fromMillisecondsSinceEpoch(reader.readInt()),
+      title: json['title'] as String,
+      amount: (json['amount'] as num).toDouble(),
+      category: json['category'] as String,
+      icon: IconData(json['iconCodePoint'] as int, fontFamily: 'MaterialIcons'),
+      color: Color(json['colorValue'] as int),
+      date: DateTime.fromMillisecondsSinceEpoch(json['dateMilliseconds'] as int),
     );
   }
 
   @override
-  void write(BinaryWriter writer, Expense obj) {
-    writer.writeString(obj.title);
-    writer.writeDouble(obj.amount);
-    writer.writeString(obj.category);
-    writer.writeInt(obj.icon.codePoint);
-    writer.writeInt(obj.color.value);
-    writer.writeInt(obj.date.millisecondsSinceEpoch);
+  int get hashCode => Object.hash(title, amount, category, date);
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is Expense &&
+        other.title == title &&
+        other.amount == amount &&
+        other.category == category &&
+        other.date == date;
   }
 }

@@ -1,39 +1,42 @@
-name: pocket_track
-description: A beautiful expense tracker Flutter application.
+name: expense_tracker
+description: A Flutter expense tracking app with multiple accounts support.
 publish_to: 'none'
+
 version: 1.0.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=3.10.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.2
-  hive: ^2.2.3
-  hive_flutter: ^1.1.0
-  path_provider: ^2.1.1
+  
+  # Core dependency for local data storage
   shared_preferences: ^2.2.2
+  
+  # Icons (if you want more icon options beyond Material Icons)
+  cupertino_icons: ^1.0.6
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  
+  # Linting rules for better code quality
   flutter_lints: ^3.0.0
-  hive_generator: ^2.0.1
-  build_runner: ^2.4.6
-
-
-
-
-
 
 flutter:
   uses-material-design: true
-
-  # If you want to add custom fonts later, uncomment and modify:
+  
+  # If you want to add custom fonts (optional)
   # fonts:
   #   - family: SF Pro Display
   #     fonts:
   #       - asset: fonts/SFProDisplay-Regular.ttf
   #       - asset: fonts/SFProDisplay-Bold.ttf
   #         weight: 700
+
+  # If you want to add app icons or images (optional)
+  # assets:
+  #   - images/
+  #   - assets/
